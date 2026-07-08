@@ -36,8 +36,10 @@ class MusicRepository(private val context: Context) {
 
             while (cursor.moveToNext()) {
                 val id = cursor.getLong(idCol)
-                val title = cursor.getString(titleCol) ?: "Unknown"
-                val artist = cursor.getString(artistCol) ?: "Unknown Artist"
+                val rawTitle = cursor.getString(titleCol) ?: "Unknown"
+                val title = cleanTitle(rawTitle)
+                val rawArtist = cursor.getString(artistCol)
+                val artist = if (rawArtist.isNullOrBlank() || rawArtist == "<unknown>") "Unknown Artist" else rawArtist
                 val duration = cursor.getLong(durationCol)
                 val albumId = cursor.getLong(albumIdCol)
 
@@ -45,7 +47,7 @@ class MusicRepository(private val context: Context) {
                     MediaStore.Audio.Media.EXTERNAL_CONTENT_URI, id
                 )
                 val albumArtUri = ContentUris.withAppendedId(
-                    android.net.Uri.parse("content://media/external/audio/albumart"), albumId
+                    android.net.Uri.parse("content://media/external/albumart"), albumId
                 )
 
                 songs.add(
@@ -62,5 +64,25 @@ class MusicRepository(private val context: Context) {
         }
 
         return songs
+    }
+
+    private fun cleanTitle(rawTitle: String): String {
+        var title = rawTitle
+
+        title = title.substringBeforeLast(".")
+        title = title.replace("-", " ").replace("_", " ")
+
+        // Remove anything in parentheses/brackets (e.g. "(music.com", "[mp3]")
+        title = title.replace(Regex("[\\(\\[].*"), "")
+
+        // Remove trailing numeric IDs (e.g. "412230")
+        title = title.replace(Regex("\\s+\\d{4,}$"), "")
+
+        title = title.replace(Regex("\\s+"), " ").trim()
+        title = title.split(" ").joinToString(" ") { word ->
+            word.replaceFirstChar { it.uppercase() }
+        }
+
+        return title.ifBlank { rawTitle }
     }
 }
