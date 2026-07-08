@@ -1,11 +1,18 @@
-package com.herrose.musicplayer.ui.theme
+﻿package com.herrose.musicplayer.ui.theme
 
 import androidx.compose.ui.graphics.Color
 
-val Purple80 = Color(0xFFD0BCFF)
-val PurpleGrey80 = Color(0xFFCCC2DC)
-val Pink80 = Color(0xFFEFB8C8)
+// Core palette - dark, premium, Spotify-inspired
+val BackgroundBlack = Color(0xFF0D0D0F)
+val SurfaceDark = Color(0xFF1A1A1E)
+val SurfaceElevated = Color(0xFF242429)
 
-val Purple40 = Color(0xFF6650a4)
-val PurpleGrey40 = Color(0xFF625b71)
-val Pink40 = Color(0xFF7D5260)
+val PurplePrimary = Color(0xFF9D4EDD)
+val PurpleLight = Color(0xFFC77DFF)
+val PurpleDark = Color(0xFF5A189A)
+
+val TextPrimary = Color(0xFFF5F5F7)
+val TextSecondary = Color(0xFFA0A0A8)
+val TextDisabled = Color(0xFF5C5C63)
+
+val ErrorRed = Color(0xFFCF6679)
