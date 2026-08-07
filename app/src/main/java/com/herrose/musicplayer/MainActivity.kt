@@ -1,4 +1,4 @@
-﻿package com.herrose.musicplayer
+package com.herrose.musicplayer
 
 import android.Manifest
 import android.content.ComponentName
@@ -18,6 +18,8 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Favorite
+import androidx.compose.material.icons.filled.FavoriteBorder
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.SkipNext
@@ -42,12 +44,15 @@ import androidx.media3.session.SessionToken
 import coil.compose.AsyncImage
 import com.google.common.util.concurrent.ListenableFuture
 import com.google.common.util.concurrent.MoreExecutors
+import com.herrose.musicplayer.data.AppDatabase
+import com.herrose.musicplayer.data.FavoriteSong
 import com.herrose.musicplayer.data.MusicRepository
 import com.herrose.musicplayer.data.Song
 import com.herrose.musicplayer.ui.theme.MusicPlayerTheme
 import com.herrose.musicplayer.ui.theme.PurpleDark
 import com.herrose.musicplayer.ui.theme.PurpleLight
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlin.math.sin
 
 class MainActivity : ComponentActivity() {
@@ -90,6 +95,10 @@ fun formatTime(millis: Long): String {
 @Composable
 fun MusicAppScreen(controller: MediaController) {
     val context = LocalContext.current
+    val coroutineScope = rememberCoroutineScope()
+    val db = remember { AppDatabase.getDatabase(context) }
+    val favoriteDao = remember { db.favoriteDao() }
+
     var songs by remember { mutableStateOf<List<Song>>(emptyList()) }
     var hasPermission by remember { mutableStateOf(false) }
     var currentSong by remember { mutableStateOf<Song?>(null) }
@@ -97,6 +106,7 @@ fun MusicAppScreen(controller: MediaController) {
     var currentPosition by remember { mutableStateOf(0L) }
     var duration by remember { mutableStateOf(0L) }
     var isUserSeeking by remember { mutableStateOf(false) }
+    var favoriteIds by remember { mutableStateOf<Set<Long>>(emptySet()) }
 
     val permission = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
         Manifest.permission.READ_MEDIA_AUDIO
@@ -115,6 +125,12 @@ fun MusicAppScreen(controller: MediaController) {
 
     LaunchedEffect(Unit) {
         launcher.launch(permission)
+    }
+
+    LaunchedEffect(Unit) {
+        favoriteDao.getAllFavorites().collect { list ->
+            favoriteIds = list.map { it.songId }.toSet()
+        }
     }
 
     DisposableEffect(controller) {
@@ -169,6 +185,20 @@ fun MusicAppScreen(controller: MediaController) {
         currentPosition = 0L
     }
 
+    fun toggleFavorite(song: Song) {
+        coroutineScope.launch {
+            if (favoriteIds.contains(song.id)) {
+                favoriteDao.removeFavorite(
+                    FavoriteSong(song.id, song.title, song.artist, song.uri, song.albumArtUri)
+                )
+            } else {
+                favoriteDao.addFavorite(
+                    FavoriteSong(song.id, song.title, song.artist, song.uri, song.albumArtUri)
+                )
+            }
+        }
+    }
+
     Column(modifier = Modifier.fillMaxSize()) {
         Column(modifier = Modifier.weight(1f).padding(16.dp)) {
             Text(
@@ -187,7 +217,9 @@ fun MusicAppScreen(controller: MediaController) {
                         SongRow(
                             song = song,
                             isCurrent = song.id == currentSong?.id,
-                            onClick = { playSong(song) }
+                            isFavorite = favoriteIds.contains(song.id),
+                            onClick = { playSong(song) },
+                            onFavoriteClick = { toggleFavorite(song) }
                         )
                     }
                 }
@@ -198,6 +230,7 @@ fun MusicAppScreen(controller: MediaController) {
             NowPlayingBar(
                 song = song,
                 isPlaying = isPlaying,
+                isFavorite = favoriteIds.contains(song.id),
                 currentPosition = currentPosition,
                 duration = duration,
                 onPlayPauseClick = {
@@ -205,6 +238,7 @@ fun MusicAppScreen(controller: MediaController) {
                 },
                 onPreviousClick = { controller.seekToPreviousMediaItem() },
                 onNextClick = { controller.seekToNextMediaItem() },
+                onFavoriteClick = { toggleFavorite(song) },
                 onSeekStart = { isUserSeeking = true },
                 onSeek = { newPosition -> currentPosition = newPosition },
                 onSeekEnd = { newPosition ->
@@ -217,7 +251,13 @@ fun MusicAppScreen(controller: MediaController) {
 }
 
 @Composable
-fun SongRow(song: Song, isCurrent: Boolean, onClick: () -> Unit) {
+fun SongRow(
+    song: Song,
+    isCurrent: Boolean,
+    isFavorite: Boolean,
+    onClick: () -> Unit,
+    onFavoriteClick: () -> Unit
+) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -236,9 +276,16 @@ fun SongRow(song: Song, isCurrent: Boolean, onClick: () -> Unit) {
                 .background(MaterialTheme.colorScheme.surfaceVariant)
         )
         Spacer(modifier = Modifier.width(12.dp))
-        Column {
+        Column(modifier = Modifier.weight(1f)) {
             Text(text = song.title, style = MaterialTheme.typography.bodyLarge)
             Text(text = song.artist, style = MaterialTheme.typography.bodyMedium)
+        }
+        IconButton(onClick = onFavoriteClick) {
+            Icon(
+                imageVector = if (isFavorite) Icons.Filled.Favorite else Icons.Filled.FavoriteBorder,
+                contentDescription = if (isFavorite) "Remove from favorites" else "Add to favorites",
+                tint = if (isFavorite) PurpleLight else MaterialTheme.colorScheme.onSurfaceVariant
+            )
         }
     }
 }
@@ -322,11 +369,13 @@ fun WaveSeekBar(
 fun NowPlayingBar(
     song: Song,
     isPlaying: Boolean,
+    isFavorite: Boolean,
     currentPosition: Long,
     duration: Long,
     onPlayPauseClick: () -> Unit,
     onPreviousClick: () -> Unit,
     onNextClick: () -> Unit,
+    onFavoriteClick: () -> Unit,
     onSeekStart: () -> Unit,
     onSeek: (Long) -> Unit,
     onSeekEnd: (Long) -> Unit
@@ -346,23 +395,31 @@ fun NowPlayingBar(
                     .size(48.dp)
                     .clip(RoundedCornerShape(6.dp))
             )
-            Spacer(modifier = Modifier.width(12.dp))
+            Spacer(modifier = Modifier.width(10.dp))
             Column(modifier = Modifier.weight(1f)) {
                 Text(text = song.title, style = MaterialTheme.typography.bodyLarge, color = Color.White)
                 Text(text = song.artist, style = MaterialTheme.typography.bodySmall, color = Color.White.copy(alpha = 0.8f))
             }
-            IconButton(onClick = onPreviousClick, modifier = Modifier.size(44.dp)) {
+            IconButton(onClick = onFavoriteClick, modifier = Modifier.size(38.dp)) {
+                Icon(
+                    imageVector = if (isFavorite) Icons.Filled.Favorite else Icons.Filled.FavoriteBorder,
+                    contentDescription = if (isFavorite) "Remove from favorites" else "Add to favorites",
+                    tint = Color.White,
+                    modifier = Modifier.size(22.dp)
+                )
+            }
+            IconButton(onClick = onPreviousClick, modifier = Modifier.size(40.dp)) {
                 Icon(
                     imageVector = Icons.Filled.SkipPrevious,
                     contentDescription = "Previous",
                     tint = PurpleLight,
-                    modifier = Modifier.size(26.dp)
+                    modifier = Modifier.size(24.dp)
                 )
             }
             IconButton(
                 onClick = onPlayPauseClick,
                 modifier = Modifier
-                    .size(56.dp)
+                    .size(52.dp)
                     .clip(RoundedCornerShape(50))
                     .background(PurpleDark)
             ) {
@@ -370,15 +427,15 @@ fun NowPlayingBar(
                     imageVector = if (isPlaying) Icons.Filled.Pause else Icons.Filled.PlayArrow,
                     contentDescription = if (isPlaying) "Pause" else "Play",
                     tint = Color.White,
-                    modifier = Modifier.size(30.dp)
+                    modifier = Modifier.size(28.dp)
                 )
             }
-            IconButton(onClick = onNextClick, modifier = Modifier.size(44.dp)) {
+            IconButton(onClick = onNextClick, modifier = Modifier.size(40.dp)) {
                 Icon(
                     imageVector = Icons.Filled.SkipNext,
                     contentDescription = "Next",
                     tint = PurpleLight,
-                    modifier = Modifier.size(26.dp)
+                    modifier = Modifier.size(24.dp)
                 )
             }
         }
