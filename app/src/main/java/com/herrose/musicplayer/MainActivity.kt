@@ -1,10 +1,12 @@
 package com.herrose.musicplayer
 
 import android.Manifest
+import androidx.compose.foundation.lazy.itemsIndexed
 import android.content.ComponentName
 import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
@@ -16,10 +18,13 @@ import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.FavoriteBorder
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.SkipNext
@@ -36,7 +41,10 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.Dialog
 import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
 import androidx.media3.session.MediaController
@@ -46,6 +54,9 @@ import com.google.common.util.concurrent.ListenableFuture
 import com.google.common.util.concurrent.MoreExecutors
 import com.herrose.musicplayer.data.AppDatabase
 import com.herrose.musicplayer.data.FavoriteSong
+import com.herrose.musicplayer.data.LyricLine
+import com.herrose.musicplayer.data.LyricsRepository
+import com.herrose.musicplayer.data.LyricsResult
 import com.herrose.musicplayer.data.MusicRepository
 import com.herrose.musicplayer.data.Song
 import com.herrose.musicplayer.ui.theme.MusicPlayerTheme
@@ -93,6 +104,26 @@ fun formatTime(millis: Long): String {
 }
 
 @Composable
+fun AlbumArt(uri: String?, modifier: Modifier = Modifier) {
+    Box(
+        modifier = modifier.background(MaterialTheme.colorScheme.surfaceVariant),
+        contentAlignment = Alignment.Center
+    ) {
+        Icon(
+            imageVector = Icons.Filled.MusicNote,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f),
+            modifier = Modifier.fillMaxSize(0.4f)
+        )
+        AsyncImage(
+            model = uri,
+            contentDescription = null,
+            modifier = Modifier.fillMaxSize()
+        )
+    }
+}
+
+@Composable
 fun MusicAppScreen(controller: MediaController) {
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
@@ -107,6 +138,7 @@ fun MusicAppScreen(controller: MediaController) {
     var duration by remember { mutableStateOf(0L) }
     var isUserSeeking by remember { mutableStateOf(false) }
     var favoriteIds by remember { mutableStateOf<Set<Long>>(emptySet()) }
+    var showFullPlayer by remember { mutableStateOf(false) }
 
     val permission = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
         Manifest.permission.READ_MEDIA_AUDIO
@@ -157,7 +189,7 @@ fun MusicAppScreen(controller: MediaController) {
                 currentPosition = controller.currentPosition
                 duration = controller.duration.coerceAtLeast(0L)
             }
-            delay(500)
+            delay(300)
         }
     }
 
@@ -244,9 +276,33 @@ fun MusicAppScreen(controller: MediaController) {
                 onSeekEnd = { newPosition ->
                     controller.seekTo(newPosition)
                     isUserSeeking = false
-                }
+                },
+                onExpandClick = { showFullPlayer = true }
             )
         }
+    }
+
+    if (showFullPlayer && currentSong != null) {
+        FullPlayerScreen(
+            song = currentSong!!,
+            isPlaying = isPlaying,
+            isFavorite = favoriteIds.contains(currentSong!!.id),
+            currentPosition = currentPosition,
+            duration = duration,
+            onPlayPauseClick = {
+                if (controller.isPlaying) controller.pause() else controller.play()
+            },
+            onPreviousClick = { controller.seekToPreviousMediaItem() },
+            onNextClick = { controller.seekToNextMediaItem() },
+            onFavoriteClick = { toggleFavorite(currentSong!!) },
+            onSeekStart = { isUserSeeking = true },
+            onSeek = { newPosition -> currentPosition = newPosition },
+            onSeekEnd = { newPosition ->
+                controller.seekTo(newPosition)
+                isUserSeeking = false
+            },
+            onCollapse = { showFullPlayer = false }
+        )
     }
 }
 
@@ -267,13 +323,11 @@ fun SongRow(
             .padding(vertical = 10.dp, horizontal = 8.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        AsyncImage(
-            model = song.albumArtUri,
-            contentDescription = null,
+        AlbumArt(
+            uri = song.albumArtUri,
             modifier = Modifier
                 .size(48.dp)
                 .clip(RoundedCornerShape(6.dp))
-                .background(MaterialTheme.colorScheme.surfaceVariant)
         )
         Spacer(modifier = Modifier.width(12.dp))
         Column(modifier = Modifier.weight(1f)) {
@@ -297,13 +351,12 @@ fun WaveSeekBar(
     duration: Long,
     onSeekStart: () -> Unit,
     onSeek: (Long) -> Unit,
-    onSeekEnd: (Long) -> Unit
+    onSeekEnd: (Long) -> Unit,
+    waveColor: Color = Color.White,
+    waveColorMuted: Color = Color.White.copy(alpha = 0.35f)
 ) {
     val safeDuration = if (duration > 0) duration else 1L
     val progress = (currentPosition.toFloat() / safeDuration.toFloat()).coerceIn(0f, 1f)
-
-    val playedColor = PurpleLight
-    val unplayedColor = PurpleDark.copy(alpha = 0.7f)
 
     var dragPosition by remember { mutableStateOf<Long?>(null) }
 
@@ -357,8 +410,8 @@ fun WaveSeekBar(
             x += 4f
         }
 
-        drawPath(unplayedPath, color = unplayedColor, style = Stroke(width = 6f, cap = StrokeCap.Round))
-        drawPath(playedPath, color = playedColor, style = Stroke(width = 6f, cap = StrokeCap.Round))
+        drawPath(unplayedPath, color = waveColorMuted, style = Stroke(width = 6f, cap = StrokeCap.Round))
+        drawPath(playedPath, color = waveColor, style = Stroke(width = 6f, cap = StrokeCap.Round))
 
         val thumbY = midY + amplitude * sin((progressX / waveLength) * 2 * Math.PI.toFloat())
         drawCircle(color = Color.White, radius = 8f, center = Offset(progressX, thumbY))
@@ -378,19 +431,20 @@ fun NowPlayingBar(
     onFavoriteClick: () -> Unit,
     onSeekStart: () -> Unit,
     onSeek: (Long) -> Unit,
-    onSeekEnd: (Long) -> Unit
+    onSeekEnd: (Long) -> Unit,
+    onExpandClick: () -> Unit
 ) {
     Column(
         modifier = Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp))
             .background(MaterialTheme.colorScheme.primary)
+            .clickable { onExpandClick() }
             .padding(horizontal = 16.dp, vertical = 12.dp)
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            AsyncImage(
-                model = song.albumArtUri,
-                contentDescription = null,
+            AlbumArt(
+                uri = song.albumArtUri,
                 modifier = Modifier
                     .size(48.dp)
                     .clip(RoundedCornerShape(6.dp))
@@ -448,7 +502,9 @@ fun NowPlayingBar(
             duration = duration,
             onSeekStart = onSeekStart,
             onSeek = onSeek,
-            onSeekEnd = onSeekEnd
+            onSeekEnd = onSeekEnd,
+            waveColor = PurpleLight,
+            waveColorMuted = PurpleDark.copy(alpha = 0.7f)
         )
 
         Row(
@@ -457,6 +513,216 @@ fun NowPlayingBar(
         ) {
             Text(text = formatTime(currentPosition), style = MaterialTheme.typography.bodySmall, color = Color.White.copy(alpha = 0.8f))
             Text(text = formatTime(duration), style = MaterialTheme.typography.bodySmall, color = Color.White.copy(alpha = 0.8f))
+        }
+    }
+}
+
+@Composable
+fun FullPlayerScreen(
+    song: Song,
+    isPlaying: Boolean,
+    isFavorite: Boolean,
+    currentPosition: Long,
+    duration: Long,
+    onPlayPauseClick: () -> Unit,
+    onPreviousClick: () -> Unit,
+    onNextClick: () -> Unit,
+    onFavoriteClick: () -> Unit,
+    onSeekStart: () -> Unit,
+    onSeek: (Long) -> Unit,
+    onSeekEnd: (Long) -> Unit,
+    onCollapse: () -> Unit
+) {
+    BackHandler { onCollapse() }
+
+    var lyricsResult by remember(song.id) { mutableStateOf<LyricsResult?>(null) }
+    var lyricsLoading by remember(song.id) { mutableStateOf(true) }
+
+    LaunchedEffect(song.id) {
+        lyricsLoading = true
+        lyricsResult = LyricsRepository.fetchLyrics(song.title, song.artist)
+        lyricsLoading = false
+    }
+
+    val syncedLines = lyricsResult?.synced
+    val activeIndex by remember(syncedLines, currentPosition) {
+        derivedStateOf {
+            if (syncedLines.isNullOrEmpty()) -1
+            else syncedLines.indexOfLast { it.timeMs <= currentPosition }
+        }
+    }
+
+    val listState = rememberLazyListState()
+
+    LaunchedEffect(activeIndex) {
+        if (activeIndex >= 0) {
+            listState.animateScrollToItem((activeIndex - 2).coerceAtLeast(0))
+        }
+    }
+
+    Dialog(onDismissRequest = onCollapse) {
+        Surface(
+            modifier = Modifier.fillMaxSize(),
+            color = MaterialTheme.colorScheme.background
+        ) {
+            Column(modifier = Modifier.fillMaxSize().padding(20.dp)) {
+                IconButton(onClick = onCollapse) {
+                    Icon(
+                        imageVector = Icons.Filled.KeyboardArrowDown,
+                        contentDescription = "Collapse",
+                        tint = MaterialTheme.colorScheme.onBackground
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(12.dp))
+
+                AlbumArt(
+                    uri = song.albumArtUri,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .aspectRatio(1f)
+                        .clip(RoundedCornerShape(16.dp))
+                )
+
+                Spacer(modifier = Modifier.height(20.dp))
+
+                Text(
+                    text = song.title,
+                    style = MaterialTheme.typography.headlineSmall,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onBackground,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    text = song.artist,
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.fillMaxWidth()
+                )
+
+                Spacer(modifier = Modifier.height(16.dp))
+
+                WaveSeekBar(
+                    song = song,
+                    currentPosition = currentPosition,
+                    duration = duration,
+                    onSeekStart = onSeekStart,
+                    onSeek = onSeek,
+                    onSeekEnd = onSeekEnd,
+                    waveColor = PurpleLight,
+                    waveColorMuted = MaterialTheme.colorScheme.surfaceVariant
+                )
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Text(text = formatTime(currentPosition), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text(text = formatTime(duration), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+
+                Spacer(modifier = Modifier.height(12.dp))
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceEvenly,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    IconButton(onClick = onFavoriteClick, modifier = Modifier.size(40.dp)) {
+                        Icon(
+                            imageVector = if (isFavorite) Icons.Filled.Favorite else Icons.Filled.FavoriteBorder,
+                            contentDescription = "Favorite",
+                            tint = if (isFavorite) PurpleLight else MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.size(26.dp)
+                        )
+                    }
+                    IconButton(onClick = onPreviousClick, modifier = Modifier.size(52.dp)) {
+                        Icon(
+                            imageVector = Icons.Filled.SkipPrevious,
+                            contentDescription = "Previous",
+                            tint = MaterialTheme.colorScheme.onBackground,
+                            modifier = Modifier.size(34.dp)
+                        )
+                    }
+                    IconButton(
+                        onClick = onPlayPauseClick,
+                        modifier = Modifier
+                            .size(68.dp)
+                            .clip(RoundedCornerShape(50))
+                            .background(PurpleDark)
+                    ) {
+                        Icon(
+                            imageVector = if (isPlaying) Icons.Filled.Pause else Icons.Filled.PlayArrow,
+                            contentDescription = "Play/Pause",
+                            tint = Color.White,
+                            modifier = Modifier.size(34.dp)
+                        )
+                    }
+                    IconButton(onClick = onNextClick, modifier = Modifier.size(52.dp)) {
+                        Icon(
+                            imageVector = Icons.Filled.SkipNext,
+                            contentDescription = "Next",
+                            tint = MaterialTheme.colorScheme.onBackground,
+                            modifier = Modifier.size(34.dp)
+                        )
+                    }
+                    Spacer(modifier = Modifier.size(40.dp))
+                }
+
+                Spacer(modifier = Modifier.height(20.dp))
+
+                Text(
+                    text = "Lyrics",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onBackground
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+
+                when {
+                    lyricsLoading -> {
+                        Text(
+                            text = "Loading lyrics...",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    !syncedLines.isNullOrEmpty() -> {
+                        LazyColumn(
+                            state = listState,
+                            modifier = Modifier.weight(1f).fillMaxWidth()
+                        ) {
+                            itemsIndexed(syncedLines) { index, line ->
+                                Text(
+                                    text = line.text,
+                                    style = if (index == activeIndex) MaterialTheme.typography.titleMedium else MaterialTheme.typography.bodyMedium,
+                                    fontWeight = if (index == activeIndex) FontWeight.Bold else FontWeight.Normal,
+                                    color = if (index == activeIndex) PurpleLight else MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.padding(vertical = 6.dp)
+                                )
+                            }
+                        }
+                    }
+                    lyricsResult?.plain != null -> {
+                        Text(
+                            text = lyricsResult!!.plain!!,
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onBackground,
+                            modifier = Modifier.weight(1f).fillMaxWidth()
+                        )
+                    }
+                    else -> {
+                        Text(
+                            text = "Lyrics not found for this song.",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+            }
         }
     }
 }
