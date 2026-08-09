@@ -24,14 +24,19 @@ import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.FavoriteBorder
+import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.LibraryMusic
 import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.QueueMusic
 import androidx.compose.material.icons.filled.Repeat
 import androidx.compose.material.icons.filled.RepeatOne
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Shuffle
 import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.material.icons.filled.SkipPrevious
@@ -45,7 +50,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
@@ -106,6 +113,8 @@ class MainActivity : ComponentActivity() {
     }
 }
 
+enum class AppTab { HOME, FAVORITES, LIBRARY, PLAYLIST }
+
 fun formatTime(millis: Long): String {
     if (millis < 0) return "0:00"
     val totalSeconds = millis / 1000
@@ -113,6 +122,15 @@ fun formatTime(millis: Long): String {
     val seconds = totalSeconds % 60
     return "%d:%02d".format(minutes, seconds)
 }
+
+fun FavoriteSong.toSong(): Song = Song(
+    id = songId,
+    title = title,
+    artist = artist,
+    duration = 0L,
+    uri = uri,
+    albumArtUri = albumArtUri
+)
 
 @Composable
 fun AlbumArt(uri: String?, modifier: Modifier = Modifier) {
@@ -148,13 +166,17 @@ fun MusicAppScreen(controller: MediaController) {
     var currentPosition by remember { mutableStateOf(0L) }
     var duration by remember { mutableStateOf(0L) }
     var isUserSeeking by remember { mutableStateOf(false) }
-    var favoriteIds by remember { mutableStateOf<Set<Long>>(emptySet()) }
+    var favoriteSongsList by remember { mutableStateOf<List<FavoriteSong>>(emptyList()) }
     var showFullPlayer by remember { mutableStateOf(false) }
     var repeatMode by remember { mutableStateOf(Player.REPEAT_MODE_OFF) }
     var shuffleEnabled by remember { mutableStateOf(false) }
     var sleepTimerEndAt by remember { mutableStateOf<Long?>(null) }
     var sleepTimerRemaining by remember { mutableStateOf<Long?>(null) }
     var sleepAtTrackEnd by remember { mutableStateOf(false) }
+    var searchQuery by remember { mutableStateOf("") }
+    var selectedTab by remember { mutableStateOf(AppTab.HOME) }
+
+    val favoriteIds = favoriteSongsList.map { it.songId }.toSet()
 
     val permission = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
         Manifest.permission.READ_MEDIA_AUDIO
@@ -177,8 +199,33 @@ fun MusicAppScreen(controller: MediaController) {
 
     LaunchedEffect(Unit) {
         favoriteDao.getAllFavorites().collect { list ->
-            favoriteIds = list.map { it.songId }.toSet()
+            favoriteSongsList = list
         }
+    }
+
+    fun playFromList(list: List<Song>, song: Song) {
+        val index = list.indexOf(song)
+        if (index == -1) return
+
+        val mediaItems = list.map { s ->
+            MediaItem.Builder()
+                .setUri(s.uri)
+                .setMediaMetadata(
+                    androidx.media3.common.MediaMetadata.Builder()
+                        .setTitle(s.title)
+                        .setArtist(s.artist)
+                        .setArtworkUri(s.albumArtUri?.let { android.net.Uri.parse(it) })
+                        .build()
+                )
+                .build()
+        }
+
+        controller.setMediaItems(mediaItems, index, 0L)
+        controller.shuffleModeEnabled = shuffleEnabled
+        controller.prepare()
+        controller.play()
+        currentSong = song
+        currentPosition = 0L
     }
 
     DisposableEffect(controller) {
@@ -188,9 +235,13 @@ fun MusicAppScreen(controller: MediaController) {
             }
 
             override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
-                val newIndex = controller.currentMediaItemIndex
-                if (newIndex in songs.indices) {
-                    currentSong = songs[newIndex]
+                val idx = controller.currentMediaItemIndex
+                val list = when (selectedTab) {
+                    AppTab.FAVORITES -> favoriteSongsList.map { it.toSong() }
+                    else -> songs
+                }
+                if (idx in list.indices) {
+                    currentSong = list[idx]
                     currentPosition = 0L
                 }
                 if (sleepAtTrackEnd &&
@@ -228,31 +279,6 @@ fun MusicAppScreen(controller: MediaController) {
                 delay(1000)
             }
         }
-    }
-
-    fun playSong(song: Song) {
-        val index = songs.indexOf(song)
-        if (index == -1) return
-
-        val mediaItems = songs.map { s ->
-            MediaItem.Builder()
-                .setUri(s.uri)
-                .setMediaMetadata(
-                    androidx.media3.common.MediaMetadata.Builder()
-                        .setTitle(s.title)
-                        .setArtist(s.artist)
-                        .setArtworkUri(s.albumArtUri?.let { android.net.Uri.parse(it) })
-                        .build()
-                )
-                .build()
-        }
-
-        controller.setMediaItems(mediaItems, index, 0L)
-        controller.shuffleModeEnabled = shuffleEnabled
-        controller.prepare()
-        controller.play()
-        currentSong = song
-        currentPosition = 0L
     }
 
     fun toggleFavorite(song: Song) {
@@ -308,31 +334,204 @@ fun MusicAppScreen(controller: MediaController) {
         sleepAtTrackEnd = false
     }
 
-    Column(modifier = Modifier.fillMaxSize()) {
-        Column(modifier = Modifier.weight(1f).padding(16.dp)) {
-            Text(
-                text = "Your Music",
-                style = MaterialTheme.typography.headlineMedium,
-                modifier = Modifier.padding(bottom = 16.dp)
-            )
+    val filteredSongs = if (searchQuery.isBlank()) {
+        songs
+    } else {
+        songs.filter {
+            it.title.contains(searchQuery, ignoreCase = true) ||
+            it.artist.contains(searchQuery, ignoreCase = true)
+        }
+    }
 
-            if (!hasPermission) {
-                Text("Permission needed to show songs. Please allow audio access.")
-            } else if (songs.isEmpty()) {
-                Text("No songs found on this device.")
-            } else {
-                LazyColumn(modifier = Modifier.weight(1f)) {
-                    items(songs) { song ->
-                        SongRow(
-                            song = song,
-                            isCurrent = song.id == currentSong?.id,
-                            isFavorite = favoriteIds.contains(song.id),
-                            onClick = { playSong(song) },
-                            onFavoriteClick = { toggleFavorite(song) }
+    val favoriteSongs = favoriteSongsList.map { it.toSong() }
+
+    Column(modifier = Modifier.fillMaxSize()) {
+        Box(modifier = Modifier.weight(1f)) {
+            when (selectedTab) {
+                AppTab.HOME -> {
+                    Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
+                        Text(
+                            text = "YourMusic",
+                            style = MaterialTheme.typography.headlineMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = PurpleLight,
+                            modifier = Modifier.padding(bottom = 4.dp)
+                        )
+
+                        if (hasPermission && songs.isNotEmpty()) {
+                            Text(
+                                text = "${songs.size} songs",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.padding(bottom = 12.dp)
+                            )
+
+                            OutlinedTextField(
+                                value = searchQuery,
+                                onValueChange = { searchQuery = it },
+                                placeholder = { Text("Search songs or artists") },
+                                leadingIcon = { Icon(Icons.Filled.Search, contentDescription = "Search", tint = PurpleLight) },
+                                trailingIcon = {
+                                    if (searchQuery.isNotEmpty()) {
+                                        IconButton(onClick = { searchQuery = "" }) {
+                                            Icon(Icons.Filled.Close, contentDescription = "Clear", tint = PurpleLight)
+                                        }
+                                    }
+                                },
+                                singleLine = true,
+                                shape = RoundedCornerShape(14.dp),
+                                colors = OutlinedTextFieldDefaults.colors(
+                                    focusedBorderColor = PurpleLight,
+                                    unfocusedBorderColor = PurpleDark,
+                                    cursorColor = PurpleLight,
+                                    focusedTextColor = MaterialTheme.colorScheme.onSurface,
+                                    unfocusedTextColor = MaterialTheme.colorScheme.onSurface
+                                ),
+                                modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp)
+                            )
+                        }
+
+                        if (!hasPermission) {
+                            Text("Permission needed to show songs. Please allow audio access.")
+                        } else if (songs.isEmpty()) {
+                            Text("No songs found on this device.")
+                        } else if (filteredSongs.isEmpty()) {
+                            Text("No results found.")
+                        } else {
+                            LazyColumn(modifier = Modifier.weight(1f)) {
+                                items(filteredSongs) { song ->
+                                    SongRow(
+                                        song = song,
+                                        isCurrent = song.id == currentSong?.id,
+                                        isFavorite = favoriteIds.contains(song.id),
+                                        onClick = { playFromList(filteredSongs, song) },
+                                        onFavoriteClick = { toggleFavorite(song) }
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+                AppTab.FAVORITES -> {
+                    Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
+                        Text(
+                            text = "Favorites",
+                            style = MaterialTheme.typography.headlineMedium,
+                            modifier = Modifier.padding(bottom = 4.dp)
+                        )
+                        Text(
+                            text = "${favoriteSongs.size} songs",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(bottom = 12.dp)
+                        )
+                        if (favoriteSongs.isEmpty()) {
+                            Text("No favorites yet. Tap the heart icon on a song to add it here.")
+                        } else {
+                            LazyColumn(modifier = Modifier.weight(1f)) {
+                                items(favoriteSongs) { song ->
+                                    SongRow(
+                                        song = song,
+                                        isCurrent = song.id == currentSong?.id,
+                                        isFavorite = true,
+                                        onClick = { playFromList(favoriteSongs, song) },
+                                        onFavoriteClick = { toggleFavorite(song) }
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+                AppTab.LIBRARY -> {
+                    Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
+                        Text(
+                            text = "Library",
+                            style = MaterialTheme.typography.headlineMedium,
+                            modifier = Modifier.padding(bottom = 4.dp)
+                        )
+                        Text(
+                            text = "${songs.size} songs",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(bottom = 12.dp)
+                        )
+                        if (songs.isEmpty()) {
+                            Text("No songs found on this device.")
+                        } else {
+                            LazyColumn(modifier = Modifier.weight(1f)) {
+                                items(songs) { song ->
+                                    SongRow(
+                                        song = song,
+                                        isCurrent = song.id == currentSong?.id,
+                                        isFavorite = favoriteIds.contains(song.id),
+                                        onClick = { playFromList(songs, song) },
+                                        onFavoriteClick = { toggleFavorite(song) }
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+                AppTab.PLAYLIST -> {
+                    Column(
+                        modifier = Modifier.fillMaxSize().padding(16.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Filled.QueueMusic,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.size(56.dp)
+                        )
+                        Spacer(modifier = Modifier.height(12.dp))
+                        Text(
+                            text = "Playlists coming soon",
+                            style = MaterialTheme.typography.titleMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
                 }
             }
+        }
+
+        val navItemColors = NavigationBarItemDefaults.colors(
+            selectedIconColor = Color.White,
+            selectedTextColor = PurpleLight,
+            indicatorColor = PurpleDark,
+            unselectedIconColor = MaterialTheme.colorScheme.onSurfaceVariant,
+            unselectedTextColor = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+
+        NavigationBar {
+            NavigationBarItem(
+                selected = selectedTab == AppTab.HOME,
+                onClick = { selectedTab = AppTab.HOME },
+                icon = { Icon(Icons.Filled.Home, contentDescription = "Home") },
+                label = { Text("Home") },
+                colors = navItemColors
+            )
+            NavigationBarItem(
+                selected = selectedTab == AppTab.FAVORITES,
+                onClick = { selectedTab = AppTab.FAVORITES },
+                icon = { Icon(Icons.Filled.Favorite, contentDescription = "Favorites") },
+                label = { Text("Favorites") },
+                colors = navItemColors
+            )
+            NavigationBarItem(
+                selected = selectedTab == AppTab.LIBRARY,
+                onClick = { selectedTab = AppTab.LIBRARY },
+                icon = { Icon(Icons.Filled.LibraryMusic, contentDescription = "Library") },
+                label = { Text("Library") },
+                colors = navItemColors
+            )
+            NavigationBarItem(
+                selected = selectedTab == AppTab.PLAYLIST,
+                onClick = { selectedTab = AppTab.PLAYLIST },
+                icon = { Icon(Icons.Filled.QueueMusic, contentDescription = "Playlist") },
+                label = { Text("Playlist") },
+                colors = navItemColors
+            )
         }
 
         currentSong?.let { song ->
@@ -663,15 +862,15 @@ fun VolumeControl() {
             drawRoundRect(
                 color = PurpleDark.copy(alpha = 0.5f),
                 topLeft = Offset(0f, centerY - trackHeight / 2f),
-                size = androidx.compose.ui.geometry.Size(size.width, trackHeight),
-                cornerRadius = androidx.compose.ui.geometry.CornerRadius(trackHeight / 2f)
+                size = Size(size.width, trackHeight),
+                cornerRadius = CornerRadius(trackHeight / 2f)
             )
 
             drawRoundRect(
                 color = PurpleLight,
                 topLeft = Offset(0f, centerY - trackHeight / 2f),
-                size = androidx.compose.ui.geometry.Size(size.width * progress, trackHeight),
-                cornerRadius = androidx.compose.ui.geometry.CornerRadius(trackHeight / 2f)
+                size = Size(size.width * progress, trackHeight),
+                cornerRadius = CornerRadius(trackHeight / 2f)
             )
 
             drawCircle(
@@ -1019,5 +1218,7 @@ fun FullPlayerScreen(
                 }
             }
         )
-    }
+    }git add .
+    git commit -m "Add bottom navigation (Home/Favorites/Library/Playlist) with polished search bar and branding"
+    git push
 }
