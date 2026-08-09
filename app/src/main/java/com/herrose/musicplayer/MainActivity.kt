@@ -24,7 +24,10 @@ import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.FavoriteBorder
 import androidx.compose.material.icons.filled.Home
@@ -33,6 +36,7 @@ import androidx.compose.material.icons.filled.LibraryMusic
 import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.PlaylistAdd
 import androidx.compose.material.icons.filled.QueueMusic
 import androidx.compose.material.icons.filled.Repeat
 import androidx.compose.material.icons.filled.RepeatOne
@@ -57,6 +61,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
@@ -76,6 +81,8 @@ import com.herrose.musicplayer.data.FavoriteSong
 import com.herrose.musicplayer.data.LyricsRepository
 import com.herrose.musicplayer.data.LyricsResult
 import com.herrose.musicplayer.data.MusicRepository
+import com.herrose.musicplayer.data.Playlist
+import com.herrose.musicplayer.data.PlaylistSong
 import com.herrose.musicplayer.data.Song
 import com.herrose.musicplayer.ui.theme.MusicPlayerTheme
 import com.herrose.musicplayer.ui.theme.PurpleDark
@@ -132,6 +139,15 @@ fun FavoriteSong.toSong(): Song = Song(
     albumArtUri = albumArtUri
 )
 
+fun PlaylistSong.toSong(): Song = Song(
+    id = songId,
+    title = title,
+    artist = artist,
+    duration = 0L,
+    uri = uri,
+    albumArtUri = albumArtUri
+)
+
 @Composable
 fun AlbumArt(uri: String?, modifier: Modifier = Modifier) {
     Box(
@@ -158,6 +174,7 @@ fun MusicAppScreen(controller: MediaController) {
     val coroutineScope = rememberCoroutineScope()
     val db = remember { AppDatabase.getDatabase(context) }
     val favoriteDao = remember { db.favoriteDao() }
+    val playlistDao = remember { db.playlistDao() }
 
     var songs by remember { mutableStateOf<List<Song>>(emptyList()) }
     var hasPermission by remember { mutableStateOf(false) }
@@ -175,6 +192,10 @@ fun MusicAppScreen(controller: MediaController) {
     var sleepAtTrackEnd by remember { mutableStateOf(false) }
     var searchQuery by remember { mutableStateOf("") }
     var selectedTab by remember { mutableStateOf(AppTab.HOME) }
+    var playlists by remember { mutableStateOf<List<Playlist>>(emptyList()) }
+    var allPlaylistSongs by remember { mutableStateOf<List<PlaylistSong>>(emptyList()) }
+    var selectedPlaylistId by remember { mutableStateOf<Long?>(null) }
+    var addToPlaylistSong by remember { mutableStateOf<Song?>(null) }
 
     val favoriteIds = favoriteSongsList.map { it.songId }.toSet()
 
@@ -200,6 +221,18 @@ fun MusicAppScreen(controller: MediaController) {
     LaunchedEffect(Unit) {
         favoriteDao.getAllFavorites().collect { list ->
             favoriteSongsList = list
+        }
+    }
+
+    LaunchedEffect(Unit) {
+        playlistDao.getAllPlaylists().collect { list ->
+            playlists = list
+        }
+    }
+
+    LaunchedEffect(Unit) {
+        playlistDao.getAllPlaylistSongs().collect { list ->
+            allPlaylistSongs = list
         }
     }
 
@@ -334,6 +367,27 @@ fun MusicAppScreen(controller: MediaController) {
         sleepAtTrackEnd = false
     }
 
+    fun addSongToPlaylist(playlistId: Long, song: Song) {
+        coroutineScope.launch {
+            playlistDao.addSongToPlaylist(
+                PlaylistSong(playlistId, song.id, song.title, song.artist, song.uri, song.albumArtUri)
+            )
+        }
+    }
+
+    fun removeSongFromPlaylist(playlistId: Long, song: Song) {
+        coroutineScope.launch {
+            playlistDao.removeSongFromPlaylist(
+                PlaylistSong(playlistId, song.id, song.title, song.artist, song.uri, song.albumArtUri)
+            )
+        }
+    }
+
+    fun deletePlaylist(playlist: Playlist) {
+        coroutineScope.launch { playlistDao.deletePlaylist(playlist) }
+        if (selectedPlaylistId == playlist.id) selectedPlaylistId = null
+    }
+
     val filteredSongs = if (searchQuery.isBlank()) {
         songs
     } else {
@@ -405,7 +459,10 @@ fun MusicAppScreen(controller: MediaController) {
                                         isCurrent = song.id == currentSong?.id,
                                         isFavorite = favoriteIds.contains(song.id),
                                         onClick = { playFromList(filteredSongs, song) },
-                                        onFavoriteClick = { toggleFavorite(song) }
+                                        onFavoriteClick = { toggleFavorite(song) },
+                                        extraIcon = Icons.Filled.PlaylistAdd,
+                                        extraIconDescription = "Add to playlist",
+                                        onExtraIconClick = { addToPlaylistSong = song }
                                     )
                                 }
                             }
@@ -437,7 +494,10 @@ fun MusicAppScreen(controller: MediaController) {
                                         isCurrent = song.id == currentSong?.id,
                                         isFavorite = true,
                                         onClick = { playFromList(favoriteSongs, song) },
-                                        onFavoriteClick = { toggleFavorite(song) }
+                                        onFavoriteClick = { toggleFavorite(song) },
+                                        extraIcon = Icons.Filled.PlaylistAdd,
+                                        extraIconDescription = "Add to playlist",
+                                        onExtraIconClick = { addToPlaylistSong = song }
                                     )
                                 }
                             }
@@ -469,7 +529,10 @@ fun MusicAppScreen(controller: MediaController) {
                                         isCurrent = song.id == currentSong?.id,
                                         isFavorite = favoriteIds.contains(song.id),
                                         onClick = { playFromList(songs, song) },
-                                        onFavoriteClick = { toggleFavorite(song) }
+                                        onFavoriteClick = { toggleFavorite(song) },
+                                        extraIcon = Icons.Filled.PlaylistAdd,
+                                        extraIconDescription = "Add to playlist",
+                                        onExtraIconClick = { addToPlaylistSong = song }
                                     )
                                 }
                             }
@@ -477,23 +540,112 @@ fun MusicAppScreen(controller: MediaController) {
                     }
                 }
                 AppTab.PLAYLIST -> {
-                    Column(
-                        modifier = Modifier.fillMaxSize().padding(16.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.Center
-                    ) {
-                        Icon(
-                            imageVector = Icons.Filled.QueueMusic,
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.size(56.dp)
-                        )
-                        Spacer(modifier = Modifier.height(12.dp))
-                        Text(
-                            text = "Playlists coming soon",
-                            style = MaterialTheme.typography.titleMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
+                    val selectedPlaylist = playlists.find { it.id == selectedPlaylistId }
+                    if (selectedPlaylist == null) {
+                        Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Column {
+                                    Text(
+                                        text = "Playlist",
+                                        style = MaterialTheme.typography.headlineMedium,
+                                        fontWeight = FontWeight.Bold,
+                                        color = PurpleLight
+                                    )
+                                    Text(
+                                        text = "${playlists.size} playlists",
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                                IconButton(onClick = { addToPlaylistSong = null; }) {}
+                                IconButton(onClick = {
+                                    coroutineScope.launch {
+                                        playlistDao.insertPlaylist(Playlist(name = "New Playlist ${playlists.size + 1}"))
+                                    }
+                                }) {
+                                    Icon(Icons.Filled.Add, contentDescription = "Create playlist", tint = PurpleLight)
+                                }
+                            }
+                            Spacer(modifier = Modifier.height(12.dp))
+                            if (playlists.isEmpty()) {
+                                Text("No playlists yet. Tap + to create one, or use the playlist icon on any song.")
+                            } else {
+                                LazyColumn(modifier = Modifier.weight(1f)) {
+                                    items(playlists) { playlist ->
+                                        val count = allPlaylistSongs.count { it.playlistId == playlist.id }
+                                        Row(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .clip(RoundedCornerShape(12.dp))
+                                                .clickable { selectedPlaylistId = playlist.id }
+                                                .padding(vertical = 12.dp, horizontal = 8.dp),
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Filled.QueueMusic,
+                                                contentDescription = null,
+                                                tint = PurpleLight,
+                                                modifier = Modifier.size(40.dp)
+                                            )
+                                            Spacer(modifier = Modifier.width(12.dp))
+                                            Column(modifier = Modifier.weight(1f)) {
+                                                Text(playlist.name, style = MaterialTheme.typography.bodyLarge)
+                                                Text("$count songs", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                            }
+                                            IconButton(onClick = { deletePlaylist(playlist) }) {
+                                                Icon(Icons.Filled.Delete, contentDescription = "Delete playlist", tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    } else {
+                        val playlistSongs = allPlaylistSongs.filter { it.playlistId == selectedPlaylist.id }.map { it.toSong() }
+                        Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                IconButton(onClick = { selectedPlaylistId = null }) {
+                                    Icon(Icons.Filled.ArrowBack, contentDescription = "Back")
+                                }
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Column {
+                                    Text(
+                                        text = selectedPlaylist.name,
+                                        style = MaterialTheme.typography.headlineSmall,
+                                        fontWeight = FontWeight.Bold,
+                                        color = PurpleLight
+                                    )
+                                    Text(
+                                        text = "${playlistSongs.size} songs",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                            }
+                            Spacer(modifier = Modifier.height(12.dp))
+                            if (playlistSongs.isEmpty()) {
+                                Text("No songs in this playlist yet. Add songs using the playlist icon on any song.")
+                            } else {
+                                LazyColumn(modifier = Modifier.weight(1f)) {
+                                    items(playlistSongs) { song ->
+                                        SongRow(
+                                            song = song,
+                                            isCurrent = song.id == currentSong?.id,
+                                            isFavorite = favoriteIds.contains(song.id),
+                                            onClick = { playFromList(playlistSongs, song) },
+                                            onFavoriteClick = { toggleFavorite(song) },
+                                            extraIcon = Icons.Filled.Close,
+                                            extraIconDescription = "Remove from playlist",
+                                            onExtraIconClick = { removeSongFromPlaylist(selectedPlaylist.id, song) }
+                                        )
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
             }
@@ -593,6 +745,68 @@ fun MusicAppScreen(controller: MediaController) {
             onCollapse = { showFullPlayer = false }
         )
     }
+
+    if (addToPlaylistSong != null) {
+        var newPlaylistName by remember { mutableStateOf("") }
+        AlertDialog(
+            onDismissRequest = { addToPlaylistSong = null },
+            title = { Text("Add to Playlist") },
+            text = {
+                Column {
+                    if (playlists.isEmpty()) {
+                        Text(
+                            "No playlists yet. Create one below.",
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(bottom = 8.dp)
+                        )
+                    } else {
+                        playlists.forEach { playlist ->
+                            Text(
+                                text = playlist.name,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable {
+                                        addSongToPlaylist(playlist.id, addToPlaylistSong!!)
+                                        Toast.makeText(context, "Added to ${playlist.name}", Toast.LENGTH_SHORT).show()
+                                        addToPlaylistSong = null
+                                    }
+                                    .padding(vertical = 12.dp)
+                            )
+                        }
+                    }
+                    Spacer(modifier = Modifier.height(8.dp))
+                    OutlinedTextField(
+                        value = newPlaylistName,
+                        onValueChange = { newPlaylistName = it },
+                        placeholder = { Text("New playlist name") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    if (newPlaylistName.isNotBlank()) {
+                        val songToAdd = addToPlaylistSong!!
+                        coroutineScope.launch {
+                            val newId = playlistDao.insertPlaylist(Playlist(name = newPlaylistName.trim()))
+                            playlistDao.addSongToPlaylist(
+                                PlaylistSong(newId, songToAdd.id, songToAdd.title, songToAdd.artist, songToAdd.uri, songToAdd.albumArtUri)
+                            )
+                        }
+                    }
+                    addToPlaylistSong = null
+                }) {
+                    Text("Create & Add")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { addToPlaylistSong = null }) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
 }
 
 @Composable
@@ -601,7 +815,10 @@ fun SongRow(
     isCurrent: Boolean,
     isFavorite: Boolean,
     onClick: () -> Unit,
-    onFavoriteClick: () -> Unit
+    onFavoriteClick: () -> Unit,
+    extraIcon: ImageVector? = null,
+    extraIconDescription: String = "",
+    onExtraIconClick: (() -> Unit)? = null
 ) {
     Row(
         modifier = Modifier
@@ -622,6 +839,15 @@ fun SongRow(
         Column(modifier = Modifier.weight(1f)) {
             Text(text = song.title, style = MaterialTheme.typography.bodyLarge)
             Text(text = song.artist, style = MaterialTheme.typography.bodyMedium)
+        }
+        if (extraIcon != null && onExtraIconClick != null) {
+            IconButton(onClick = onExtraIconClick) {
+                Icon(
+                    imageVector = extraIcon,
+                    contentDescription = extraIconDescription,
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
         }
         IconButton(onClick = onFavoriteClick) {
             Icon(
@@ -961,9 +1187,7 @@ fun FullPlayerScreen(
             modifier = Modifier.fillMaxSize(),
             color = MaterialTheme.colorScheme.background
         ) {
-            Column(
-                modifier = Modifier.fillMaxSize().padding(horizontal = 20.dp, vertical = 12.dp)
-            ) {
+            Column(modifier = Modifier.fillMaxSize().padding(horizontal = 20.dp, vertical = 12.dp)) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
@@ -1060,16 +1284,8 @@ fun FullPlayerScreen(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
-                    Text(
-                        text = formatTime(currentPosition),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    Text(
-                        text = formatTime(duration),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
+                    Text(text = formatTime(currentPosition), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text(text = formatTime(duration), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
 
                 Spacer(modifier = Modifier.height(6.dp))
@@ -1143,7 +1359,6 @@ fun FullPlayerScreen(
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         }
-
                         !syncedLines.isNullOrEmpty() -> {
                             LazyColumn(
                                 state = listState,
@@ -1160,7 +1375,6 @@ fun FullPlayerScreen(
                                 }
                             }
                         }
-
                         lyricsResult?.plain != null -> {
                             LazyColumn(modifier = Modifier.fillMaxSize()) {
                                 item {
@@ -1172,7 +1386,6 @@ fun FullPlayerScreen(
                                 }
                             }
                         }
-
                         else -> {
                             Text(
                                 text = "Lyrics not found for this song.",
