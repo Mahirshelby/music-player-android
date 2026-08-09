@@ -417,6 +417,8 @@ fun MusicAppScreen(controller: MediaController) {
                         Text(
                             text = "Favorites",
                             style = MaterialTheme.typography.headlineMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = PurpleLight,
                             modifier = Modifier.padding(bottom = 4.dp)
                         )
                         Text(
@@ -447,6 +449,8 @@ fun MusicAppScreen(controller: MediaController) {
                         Text(
                             text = "Library",
                             style = MaterialTheme.typography.headlineMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = PurpleLight,
                             modifier = Modifier.padding(bottom = 4.dp)
                         )
                         Text(
@@ -957,7 +961,9 @@ fun FullPlayerScreen(
             modifier = Modifier.fillMaxSize(),
             color = MaterialTheme.colorScheme.background
         ) {
-            Column(modifier = Modifier.fillMaxSize().padding(horizontal = 20.dp, vertical = 12.dp)) {
+            Column(
+                modifier = Modifier.fillMaxSize().padding(horizontal = 20.dp, vertical = 12.dp)
+            ) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
@@ -1054,8 +1060,16 @@ fun FullPlayerScreen(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
-                    Text(text = formatTime(currentPosition), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    Text(text = formatTime(duration), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text(
+                        text = formatTime(currentPosition),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Text(
+                        text = formatTime(duration),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
                 }
 
                 Spacer(modifier = Modifier.height(6.dp))
@@ -1129,6 +1143,7 @@ fun FullPlayerScreen(
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         }
+
                         !syncedLines.isNullOrEmpty() -> {
                             LazyColumn(
                                 state = listState,
@@ -1145,6 +1160,7 @@ fun FullPlayerScreen(
                                 }
                             }
                         }
+
                         lyricsResult?.plain != null -> {
                             LazyColumn(modifier = Modifier.fillMaxSize()) {
                                 item {
@@ -1156,6 +1172,7 @@ fun FullPlayerScreen(
                                 }
                             }
                         }
+
                         else -> {
                             Text(
                                 text = "Lyrics not found for this song.",
@@ -1218,7 +1235,5 @@ fun FullPlayerScreen(
                 }
             }
         )
-    }git add .
-    git commit -m "Add bottom navigation (Home/Favorites/Library/Playlist) with polished search bar and branding"
-    git push
+    }
 }
